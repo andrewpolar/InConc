@@ -39,14 +39,16 @@
 #include "Function.h"
 
 double g_pearson = 0.0;
-std::atomic<uint64_t> global_seed_counter{1};
+std::atomic<uint64_t> global_seed_counter{ 1 };
 
 void ValidationDeterminant(const std::vector<std::unique_ptr<Function>>& inner,
     const std::vector<std::unique_ptr<Function>>& outer, const std::vector<std::vector<double>>& features,
-    const std::vector<double>& targets, int nInner, int nOuter) {
+    const std::vector<double>& targets) {
 
     size_t nRecords = targets.size();
     size_t nFeatures = features[0].size();
+    size_t nInner = inner.size() / nFeatures;
+    size_t nOuter = outer.size() / nInner;
     std::vector<double> models0(nInner);
     std::vector<double> models1(nOuter);
     std::vector<double> predictions(nRecords);
@@ -73,7 +75,7 @@ void ValidationDeterminant(const std::vector<std::unique_ptr<Function>>& inner,
 
 void TrainingDeterminant(std::vector<std::unique_ptr<Function>>& inner,
     std::vector<std::unique_ptr<Function>>& outer, const std::vector<std::vector<double>>& features,
-    const std::vector<double>& targets, int nInner, int nOuter, int nBatchSize, int nRecords, double alpha, double accuracy) {
+    const std::vector<double>& targets, int nBatchSize, int nRecords, double alpha, double accuracy) {
 
     //this is only random digit generator
     uint64_t seed1 = static_cast<uint64_t>(std::random_device{}());
@@ -84,6 +86,8 @@ void TrainingDeterminant(std::vector<std::unique_ptr<Function>>& inner,
     std::uniform_int_distribution<int> dist(0, nRecords - 1);
 
     size_t nFeatures = features[0].size();
+    size_t nInner = inner.size() / nFeatures;
+    size_t nOuter = outer.size() / nInner;
     std::vector<double> models0(nInner);
     std::vector<double> models1(nOuter);
     std::vector<double> deltas0(nInner);
@@ -223,7 +227,7 @@ void DeterminantsParallel() {
             // Launch thread to train inners[b] and outers[b]
             threads.emplace_back(TrainingDeterminant, std::ref(inners[b]), std::ref(outers[b]),
                 std::cref(features_training), std::cref(targets_training),
-                nInner, nOuter, nBatchSize, nTrainingRecords, alpha, accuracy);
+                nBatchSize, nTrainingRecords, alpha, accuracy);
         }
 
         for (auto& t : threads) {
@@ -247,7 +251,7 @@ void DeterminantsParallel() {
         if (g_pearson >= termination) break;
     }
     printf("Validation ...\n");
-    ValidationDeterminant(inners[0], outers[0], features_validation, targets_validation, nInner, nOuter);
+    ValidationDeterminant(inners[0], outers[0], features_validation, targets_validation);
     printf("Pearson %f\n\n", g_pearson);
 }
 
