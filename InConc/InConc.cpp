@@ -39,6 +39,7 @@
 #include "Function.h"
 
 double g_pearson = 0.0;
+std::atomic<uint64_t> global_seed_counter{1};
 
 void ValidationDeterminant(const std::vector<std::unique_ptr<Function>>& inner,
     const std::vector<std::unique_ptr<Function>>& outer, const std::vector<std::vector<double>>& features,
@@ -72,7 +73,15 @@ void ValidationDeterminant(const std::vector<std::unique_ptr<Function>>& inner,
 
 void TrainingDeterminant(std::vector<std::unique_ptr<Function>>& inner,
     std::vector<std::unique_ptr<Function>>& outer, const std::vector<std::vector<double>>& features,
-    const std::vector<double>& targets, int nInner, int nOuter, int start, int end, int nRecords, double alpha, double accuracy) {
+    const std::vector<double>& targets, int nInner, int nOuter, int nBatchSize, int nRecords, double alpha, double accuracy) {
+
+    //this is only random digit generator
+    uint64_t seed1 = static_cast<uint64_t>(std::random_device{}());
+    uint64_t seed2 = static_cast<uint64_t>(std::hash<std::thread::id>()(std::this_thread::get_id()));
+    uint64_t seed3 = global_seed_counter.fetch_add(1);
+    uint64_t final_seed = seed1 ^ seed2 ^ (seed3 * 0x9e3779b97f4a7c15ULL);
+    thread_local std::mt19937_64 rng(final_seed);
+    std::uniform_int_distribution<int> dist(0, nRecords - 1);
 
     size_t nFeatures = features[0].size();
     std::vector<double> models0(nInner);
@@ -80,9 +89,8 @@ void TrainingDeterminant(std::vector<std::unique_ptr<Function>>& inner,
     std::vector<double> deltas0(nInner);
     std::vector<double> deltas1(nOuter);
 
-    for (int idx = start; idx < end; ++idx) {
-        int record = idx;
-        if (record >= nRecords) record -= nRecords;
+    for (int loop = 0; loop < nBatchSize; ++loop) {
+        int record = dist(rng);
         for (int k = 0; k < nInner; ++k) {
             models0[k] = 0.0;
             for (size_t j = 0; j < nFeatures; ++j) {
@@ -207,22 +215,15 @@ void DeterminantsParallel() {
     printf("Parallel version\n");
     printf("Targets are determinants of random %d * %d matrices, %d training records\n",
         nMatrixSize, nMatrixSize, nTrainingRecords);
-    int start = 0;
     std::vector<std::thread> threads;
     for (int loop = 0; loop < nLoops; ++loop) {
         // concurrent training of model copies
         threads.clear();
         for (int b = 0; b < nBatches; ++b) {
-            int threadStart = start;
-            int threadEnd = start + nBatchSize;
             // Launch thread to train inners[b] and outers[b]
             threads.emplace_back(TrainingDeterminant, std::ref(inners[b]), std::ref(outers[b]),
                 std::cref(features_training), std::cref(targets_training),
-                nInner, nOuter, threadStart, threadEnd, nTrainingRecords, alpha, accuracy);
-
-            // advance start for next batch (wrap-around)
-            start += nBatchSize;
-            if (start >= nTrainingRecords) start -= nTrainingRecords;
+                nInner, nOuter, nBatchSize, nTrainingRecords, alpha, accuracy);
         }
 
         for (auto& t : threads) {
